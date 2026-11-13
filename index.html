@@ -1,0 +1,1280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>J_lure</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #f4f1ec;
+      color: #353a36;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    #lureMap { height: 330px; width: 100%; border-radius: 14px; z-index: 1; }
+  </style>
+</head>
+<body class="min-h-screen pb-8">
+  <div class="max-w-xl mx-auto px-4 pt-3.5 space-y-3">
+    <!-- Compact Header -->
+    <header class="flex items-center justify-between gap-2">
+      <div>
+        <h1 class="text-lg font-bold tracking-tight text-[#2f3531] flex items-center gap-1.5">
+          <span>🎣</span>
+          <span>J_lure</span>
+        </h1>
+        <p id="coordSubtitle" class="text-[11px] text-[#6e736e]">南宁 · 邕江市区 (22.8170, 108.3665)</p>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span id="statusBadge" class="text-[11px] px-2.5 py-1 rounded-full bg-[#e6ece8] text-[#496356] border border-[#cad6ce] font-medium">
+          准备就绪
+        </span>
+        <button id="settingsToggleBtn" type="button" aria-label="设置坐标与节点"
+          class="min-h-[32px] px-2.5 py-1 rounded-full bg-[#fcfbf9] hover:bg-[#e9e4dc] text-xs border border-[#ddd6cb] text-[#525853] transition">
+          ⚙️
+        </button>
+      </div>
+    </header>
+
+    <!-- Toast Banner -->
+    <div id="toastBanner" class="hidden rounded-xl px-3.5 py-2 text-xs border"></div>
+
+    <!-- Collapsible Settings Drawer (Hidden by default) -->
+    <section id="settingsDrawer" class="hidden bg-[#fcfbf9] border border-[#e3ddd3] rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+      <div class="text-xs font-semibold text-[#2f3531]">坐标与转发节点设置</div>
+      <div class="flex items-center gap-1.5">
+        <input id="workerUrlInput" type="url" placeholder="填入 Cloudflare Worker 网址（如 https://xxx.workers.dev）"
+          class="flex-1 min-h-[36px] px-2.5 rounded-xl bg-[#f4f1ec] border border-[#ddd6cb] text-xs text-[#2f3531] focus:outline-none focus:border-[#6c8478]" />
+        <button id="saveWorkerBtn" type="button"
+          class="shrink-0 min-h-[36px] px-3 rounded-xl bg-[#6c8478] hover:bg-[#5b7266] text-xs font-semibold text-white transition">
+          保存节点
+        </button>
+      </div>
+      <div class="grid grid-cols-5 gap-2">
+        <div class="col-span-2">
+          <label for="latInput" class="block text-[10px] text-[#6e736e] mb-0.5">纬度 (Lat)</label>
+          <input id="latInput" type="number" step="0.0001" value="22.8170"
+            class="w-full min-h-[36px] px-2.5 rounded-xl bg-[#f4f1ec] border border-[#ddd6cb] text-xs text-[#2f3531] focus:outline-none focus:border-[#6c8478]" />
+        </div>
+        <div class="col-span-2">
+          <label for="lonInput" class="block text-[10px] text-[#6e736e] mb-0.5">经度 (Lon)</label>
+          <input id="lonInput" type="number" step="0.0001" value="108.3665"
+            class="w-full min-h-[36px] px-2.5 rounded-xl bg-[#f4f1ec] border border-[#ddd6cb] text-xs text-[#2f3531] focus:outline-none focus:border-[#6c8478]" />
+        </div>
+        <div class="col-span-1 flex items-end">
+          <button id="fetchBtn" type="button"
+            class="w-full min-h-[36px] rounded-xl bg-[#e9e4dc] hover:bg-[#ded7cc] text-xs font-semibold text-[#353a36] border border-[#d6cec1] transition">
+            刷新
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Spots + GPS + Species Strip -->
+    <section class="space-y-2">
+      <div class="flex items-center gap-1.5">
+        <button id="gpsBtn" type="button"
+          class="shrink-0 min-h-[34px] px-3 rounded-xl bg-[#6c8478] hover:bg-[#5b7266] active:scale-[0.98] text-white font-semibold text-xs transition flex items-center gap-1 shadow-sm">
+          <span>📍</span>
+          <span>定位</span>
+        </button>
+        <div id="presetSpots" class="flex gap-1.5 overflow-x-auto no-scrollbar py-0.5"></div>
+      </div>
+      <div id="speciesTabs" class="flex gap-1.5 overflow-x-auto no-scrollbar pb-0.5"></div>
+    </section>
+
+    <!-- Main 2-Tab Switcher -->
+    <nav class="grid grid-cols-2 gap-1.5 bg-[#e9e4dc] p-1 rounded-2xl border border-[#ddd6cb]">
+      <button id="tabBtnForecast" type="button"
+        class="min-h-[38px] rounded-xl text-xs font-semibold transition bg-[#fcfbf9] text-[#2f3531] shadow-sm">
+        ⏱️ 窗口与手法
+      </button>
+      <button id="tabBtnMap" type="button"
+        class="min-h-[38px] rounded-xl text-xs font-semibold transition text-[#6e736e] hover:text-[#2f3531]">
+        🗺️ 地图找标点
+      </button>
+    </nav>
+
+    <!-- TAB 1: Forecast & Tactic -->
+    <main id="panelForecast" class="space-y-3">
+      <!-- 48h Score Chart Card -->
+      <section class="bg-[#fcfbf9] border border-[#e3ddd3] rounded-2xl p-3.5 shadow-sm">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="text-xs font-semibold text-[#2f3531]">
+            48h 窗口评分 · 最佳 <span id="bestWindowLabel" class="text-[#4e705e]">--</span>
+          </div>
+          <span class="text-[10px] text-[#6e736e]">绿≥75 · 蓝≥55 · 橙&lt;55</span>
+        </div>
+        <div id="barsContainer" class="flex items-end gap-1.5 h-32 overflow-x-auto no-scrollbar pt-3 pb-1"></div>
+      </section>
+
+      <!-- Unified Strategy Card -->
+      <section class="bg-[#fcfbf9] border border-[#e3ddd3] rounded-2xl p-4 space-y-3 shadow-sm">
+        <div class="flex items-center justify-between gap-2">
+          <div>
+            <div class="text-[11px] text-[#6e736e]">选中时段策略</div>
+            <div id="detailTitle" class="text-base font-bold text-[#2f3531] mt-0.5">--</div>
+          </div>
+          <span id="detailActivity" class="text-xs px-2.5 py-1 rounded-full font-medium bg-[#e6ece8] text-[#496356] border border-[#cad6ce] shrink-0">
+            --
+          </span>
+        </div>
+
+        <!-- Compact Weather Strip -->
+        <div id="weatherStrip" class="flex flex-wrap gap-1.5 text-[11px]"></div>
+
+        <!-- Actionable Tactic -->
+        <div class="space-y-2 pt-2 border-t border-[#ebe6dd] text-xs">
+          <div>
+            <span class="text-[#6e736e]">目标水层：</span>
+            <span id="tacticLayer" class="text-[#2f3531] font-medium">--</span>
+          </div>
+          <div>
+            <span class="text-[#6e736e]">重点结构：</span>
+            <span id="tacticStructure" class="text-[#2f3531] font-medium">--</span>
+          </div>
+          <div>
+            <div class="text-[#6e736e] mb-1">推荐拟饵：</div>
+            <div id="tacticLures" class="flex flex-wrap gap-1.5"></div>
+          </div>
+          <div class="bg-[#f4f1ec] border border-[#e3ddd3] rounded-xl p-2.5">
+            <div class="text-[#6e736e] mb-0.5">操竿手法：</div>
+            <div id="tacticTechnique" class="text-[#2f3531] leading-relaxed">--</div>
+          </div>
+        </div>
+
+        <!-- Collapsible Habitat & Score Reasons -->
+        <details class="pt-1 border-t border-[#ebe6dd] text-xs">
+          <summary class="cursor-pointer text-[#5b7266] font-medium select-none py-1">
+            查看鱼种习性与评分依据
+          </summary>
+          <div class="mt-2 space-y-2 text-[#525853]">
+            <div><span class="font-semibold text-[#2f3531]">常驻水层：</span><span id="speciesLayer">--</span></div>
+            <div><span class="font-semibold text-[#2f3531]">栖息偏好：</span><span id="speciesHabitat">--</span></div>
+            <ul id="detailReasons" class="space-y-1 list-disc pl-4 pt-1"></ul>
+          </div>
+        </details>
+      </section>
+    </main>
+
+    <!-- TAB 2: Interactive Map & Hotspots -->
+    <main id="panelMap" class="hidden space-y-3">
+      <section class="bg-[#fcfbf9] border border-[#e3ddd3] rounded-2xl p-3.5 space-y-2.5 shadow-sm">
+        <div class="flex items-center justify-between gap-2">
+          <span id="mapLinkBanner" class="text-[11px] font-medium text-[#496356]">
+            已联动当前时段风向与目标鱼种
+          </span>
+          <div class="flex items-center gap-1.5">
+            <button id="basemapToggleBtn" type="button"
+              class="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#e9e4dc] hover:bg-[#ded7cc] text-[#353a36] text-[11px] font-semibold border border-[#d6cec1] transition">
+              🛰️ 卫星图
+            </button>
+            <button id="analyzeHotspotBtn" type="button"
+              class="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#6c8478] hover:bg-[#5b7266] text-white text-[11px] font-semibold transition">
+              🎯 分析此点
+            </button>
+          </div>
+        </div>
+
+        <div id="lureMap" class="border border-[#ddd6cb]"></div>
+
+        <div class="flex items-center justify-between text-[11px] text-[#6e736e]">
+          <span id="hotspotStatus">点击地图任意水面自动分析周边 1.2km 结构</span>
+          <span>范围 1.2km</span>
+        </div>
+
+        <div id="hotspotList" class="space-y-2"></div>
+      </section>
+    </main>
+  </div>
+
+  <script>
+    const PRESET_SPOTS = [
+      { name: "南宁 · 邕江市区", lat: 22.8170, lon: 108.3665 },
+      { name: "南宁 · 良凤江", lat: 22.7228, lon: 108.2871 },
+      { name: "南宁 · 大王滩", lat: 22.6330, lon: 108.4580 },
+      { name: "南宁 · 蒲庙邕宁", lat: 22.7580, lon: 108.4850 },
+      { name: "柳州 · 柳江", lat: 24.3250, lon: 109.4150 },
+      { name: "桂林 · 漓江", lat: 25.2736, lon: 110.2902 }
+    ];
+
+    // spot_bias: open_water | structure_bottom | shallow_weed | stream_rapid
+    const SPECIES_DB = {
+      "翘嘴": {
+        name: "翘嘴",
+        spot_bias: "open_water",
+        water_layer: "中上层（早晚或弱光期常上浮至表层追食白条）",
+        habitat: "邕江/水库开阔亮水区、迎风岸浪区、桥墩洄水交界与深浅交界坎",
+        ideal_temp_min: 18, ideal_temp_max: 30, wind_tolerance_kmh: 22,
+        high_activity_tactic: {
+          activity_level: "高活性追饵",
+          target_layer: "表层 ~ 1.5m 中上层",
+          target_structure: "迎风浪区、支流交汇口、桥墩亮水交界带",
+          recommended_lures: ["7–10g 浮水米诺", "9–12g 铅笔", "7–10g 瓜子/柳叶亮片"],
+          retrieve_technique: "扇形远投，匀速慢收配合轻抽停顿（Stop & Go）诱发截口"
+        },
+        low_activity_tactic: {
+          activity_level: "中下层警戒",
+          target_layer: "2m ~ 4m 中下层",
+          target_structure: "深水坎位、桥墩背流阴影区",
+          recommended_lures: ["10–14g 铁板/VIB", "8–12g 沉水米诺"],
+          retrieve_technique: "读秒下沉至中下层，慢速匀收或小幅度平抽"
+        }
+      },
+      "黑鲈": {
+        name: "黑鲈",
+        spot_bias: "structure_bottom",
+        water_layer: "全水层偏中下层，强依赖障碍物伏击",
+        habitat: "南宁周边水库乱石堆、倒树枝桠、水草边缘及桥墩阴影区",
+        ideal_temp_min: 16, ideal_temp_max: 28, wind_tolerance_kmh: 18,
+        high_activity_tactic: {
+          activity_level: "高活性巡游",
+          target_layer: "表层 ~ 1.5m 近岸结构区",
+          target_structure: "水草外缘、倒树旁、浅滩乱石坎",
+          recommended_lures: ["波爬（Popper）", "7–10g 复合旋转亮片", "浅潜摇滚"],
+          retrieve_technique: "贴近结构边缘抛投，波爬轻点水花停顿 2 秒；亮片贴草边匀收"
+        },
+        low_activity_tactic: {
+          activity_level: "压底躲藏",
+          target_layer: "贴底及石头缝隙",
+          target_structure: "深水乱石缝、桥墩根部、背阴陡坎底部",
+          recommended_lures: ["5–7g 德州钓组", "3.5–5g 铅头钩 + 卷尾蛆", "无铅面条虫"],
+          retrieve_technique: "抛入结构区沉底后轻抖原地诱鱼，或极慢速拖底跳底"
+        }
+      },
+      "鳜鱼": {
+        name: "鳜鱼",
+        spot_bias: "structure_bottom",
+        water_layer: "绝对底层（贴底 0.5m 内伏击）",
+        habitat: "水库乱石缝、喀斯特溶岩暗坎、桥墩底部礁石区（典型昼伏夜出）",
+        ideal_temp_min: 16, ideal_temp_max: 28, wind_tolerance_kmh: 20,
+        high_activity_tactic: {
+          activity_level: "积极伏击",
+          target_layer: "贴底 0.3m ~ 1m",
+          target_structure: "石滩斜坡、进水口乱石坎、桥墩底部",
+          recommended_lures: ["7–10g 铅头钩 + T尾软鱼", "缓沉米诺"],
+          retrieve_technique: "抛至石区后控底慢收，让拟饵轻磕石底制造震动"
+        },
+        low_activity_tactic: {
+          activity_level: "死守石缝",
+          target_layer: "贴底石缝边缘",
+          target_structure: "深水乱石缝隙、大石块背流面与桥墩阴影底",
+          recommended_lures: ["5–7g 倒吊钓组", "5g 防挂底铅头钩 + 针尾软虫"],
+          retrieve_technique: "定点击底收紧虚线，小幅度颤抖竿尖慢拖过石缝再停顿"
+        }
+      },
+      "罗非鱼": {
+        name: "罗非鱼",
+        spot_bias: "shallow_weed",
+        water_layer: "中下层至浅滩近底（广西暖水期活跃，强光贴边躲荫）",
+        habitat: "水草浅滩、库湾缓坡、倒树阴影与生活排水口暖水区",
+        ideal_temp_min: 22, ideal_temp_max: 34, wind_tolerance_kmh: 16,
+        high_activity_tactic: {
+          activity_level: "浅滩抢食",
+          target_layer: "0.5m ~ 1.5m 近岸浅水",
+          target_structure: "浅滩草边、缓坡泥沙底、桥墩背阴浅水",
+          recommended_lures: ["2–3.5g 亮片", "1.5–3g 铅头钩 + 卷尾蛆", "微物 VIB"],
+          retrieve_technique: "沿草边慢速匀收，偶尔停顿让亮片飘落，注意看线微顿"
+        },
+        low_activity_tactic: {
+          activity_level: "贴底护窝",
+          target_layer: "贴底浅窝区",
+          target_structure: "背阴树荫下、乱石边沙底产卵窝",
+          recommended_lures: ["1.5–2.5g 铅头钩 + 红虫/面条虫", "倒吊微物软饵"],
+          retrieve_technique: "抛入窝边沉底后原地轻抖挑逗，停顿 2–3 秒再扬竿"
+        }
+      },
+      "黑鱼": {
+        name: "黑鱼",
+        spot_bias: "shallow_weed",
+        water_layer: "浅水草区表层与近底障碍区",
+        habitat: "南宁野塘、邕江支流芦苇荡、水葫芦/浮萍边缘及浅水暗草区",
+        ideal_temp_min: 20, ideal_temp_max: 34, wind_tolerance_kmh: 15,
+        high_activity_tactic: {
+          activity_level: "草区炸水",
+          target_layer: "水面 ~ 0.5m 重草区",
+          target_structure: "水草空洞（亮水窗）、芦苇边、倒树浅滩",
+          recommended_lures: ["10–16g 雷蛙", "复合旋转亮片", "防挂草德州软蛙"],
+          retrieve_technique: "抛过草区后轻拖入亮水洞停顿 2 秒，见炸水先停 1–2 秒让鱼吞稳再大力抽刺"
+        },
+        low_activity_tactic: {
+          activity_level: "潜伏草底",
+          target_layer: "草根底部",
+          target_structure: "浓密水草深处、岸边树荫泥坎",
+          recommended_lures: ["7–10g 德州钓组（大卷尾/小龙虾软饵）", "加重雷蛙"],
+          retrieve_technique: "贴草边慢拖并小幅跳底，停顿时间拉长至 3–5 秒"
+        }
+      },
+      "军鱼": {
+        name: "军鱼",
+        spot_bias: "stream_rapid",
+        water_layer: "中下层至急流卵石浅滩（喜高溶氧活水）",
+        habitat: "南宁周边溪流急滩、大石背流区、跌水深潭与泄水口",
+        ideal_temp_min: 18, ideal_temp_max: 29, wind_tolerance_kmh: 18,
+        high_activity_tactic: {
+          activity_level: "急流抢食",
+          target_layer: "中层 ~ 底层卵石急滩",
+          target_structure: "急流白水泡区、卵石浅滩交界处",
+          recommended_lures: ["3–5g 瓜子亮片", "4–7g 缓沉微物米诺", "小型铅笔"],
+          retrieve_technique: "斜向上游抛投，顺流中速小抽收线，保持拟饵泳姿不翻"
+        },
+        low_activity_tactic: {
+          activity_level: "深潭贴底",
+          target_layer: "深潭底层乱石缝",
+          target_structure: "急流下游深潭边缘、大石块后方洄水湾",
+          recommended_lures: ["2.5–3.5g 铅头钩 + 软虫", "3–5g 沉水米诺"],
+          retrieve_technique: "沉底后贴石面轻跳慢收，顺水流自然飘荡搜索石头缝"
+        }
+      },
+      "马口鱼": {
+        name: "马口鱼",
+        spot_bias: "stream_rapid",
+        water_layer: "中上层浅滩溪流",
+        habitat: "良凤江上游、大明山周边清澈溪流浅滩、砾石缓流交界",
+        ideal_temp_min: 16, ideal_temp_max: 28, wind_tolerance_kmh: 15,
+        high_activity_tactic: {
+          activity_level: "浅滩追咬",
+          target_layer: "表层 ~ 0.6m 浅流",
+          target_structure: "溪流浅滩砾石区、支流汇入浅口",
+          recommended_lures: ["1.5–3g 瓜子亮片", "2–3.5g 微物米诺", "助投器 + 飞蝇毛钩"],
+          retrieve_technique: "跨流抛投，匀收配合轻微抖腕制造闪烁频闪"
+        },
+        low_activity_tactic: {
+          activity_level: "深潭躲避",
+          target_layer: "深潭中下层",
+          target_structure: "急流下游深水潭、岸边石头阴影",
+          recommended_lures: ["1.5–2g 铅头钩 + 1寸针尾虫", "2g 沉水亮片"],
+          retrieve_technique: "读秒沉至中下层后慢速匀收或轻跳"
+        }
+      },
+      "红眼鳟": {
+        name: "红眼鳟",
+        spot_bias: "open_water",
+        water_layer: "中上层至中层急缓交界",
+        habitat: "邕江主河道流水中上层、排灌站出水口、桥墩迎流面",
+        ideal_temp_min: 18, ideal_temp_max: 30, wind_tolerance_kmh: 20,
+        high_activity_tactic: {
+          activity_level: "迎流抢食",
+          target_layer: "0.5m ~ 1.5m 流水中层",
+          target_structure: "桥墩迎流面、出水口缓流带",
+          recommended_lures: ["3–5g 柳叶亮片", "5g 小胖子/摇滚", "4–6g 小米诺"],
+          retrieve_technique: "斜向上游抛投，顺水或横切水流匀速收线"
+        },
+        low_activity_tactic: {
+          activity_level: "深槽巡游",
+          target_layer: "2m ~ 3m 中下层",
+          target_structure: "河道弯道深水区、支流口深坎",
+          recommended_lures: ["5–7g 小型 VIB", "5g 沉水铅笔"],
+          retrieve_technique: "沉至中下层后慢速匀收穿插小幅度停顿"
+        }
+      },
+      "鳡鱼": {
+        name: "鳡鱼",
+        spot_bias: "open_water",
+        water_layer: "中上层高速巡游",
+        habitat: "邕江急流交界、水电站泄洪口下游、大水库开阔水域追逐白条群",
+        ideal_temp_min: 20, ideal_temp_max: 32, wind_tolerance_kmh: 25,
+        high_activity_tactic: {
+          activity_level: "狂暴追击",
+          target_layer: "表层 ~ 2m 亮水区",
+          target_structure: "主河道急缓流交界、支流交汇炸水点",
+          recommended_lures: ["14–21g 铅笔", "15–20g 铁板", "12–18g 远投米诺"],
+          retrieve_technique: "远投覆盖，中高速抽停或水面快速 Z 字狗步"
+        },
+        low_activity_tactic: {
+          activity_level: "中层巡游",
+          target_layer: "2m ~ 5m 中层",
+          target_structure: "深槽边缘、水下暗坎外侧",
+          recommended_lures: ["15–25g 重铁板", "18g 大号 VIB"],
+          retrieve_technique: "深水扇形搜索，中速匀收穿插大抽停顿"
+        }
+      },
+      "太阳鱼": {
+        name: "太阳鱼",
+        spot_bias: "structure_bottom",
+        water_layer: "近岸浅水至中下层结构区",
+        habitat: "南宁周边水库浅滩乱石堆、岸边水草、栈道阴影下（微物练手神器）",
+        ideal_temp_min: 18, ideal_temp_max: 32, wind_tolerance_kmh: 16,
+        high_activity_tactic: {
+          activity_level: "浅岸抢食",
+          target_layer: "0.3m ~ 1.2m 近岸区",
+          target_structure: "岸边乱石堆、水草边缘、栈道阴影",
+          recommended_lures: ["1–2g 铅头钩 + 1寸软虫", "1.5–2.5g 小亮片"],
+          retrieve_technique: "贴岸抛投，极慢速匀收或轻轻点挑，见轻微顿口即可扬竿"
+        },
+        low_activity_tactic: {
+          activity_level: "石缝躲藏",
+          target_layer: "贴底石缝",
+          target_structure: "乱石缝隙、深水岸坎脚下",
+          recommended_lures: ["1–1.5g 倒吊微物软虫", "红虫软饵"],
+          retrieve_technique: "原地轻抖慢拖，停顿 2 秒等待吸饵"
+        }
+      }
+    };
+
+    let currentSpeciesKey = "翘嘴";
+    let currentSpotName = "南宁 · 邕江市区";
+    let hourlyWeather = [];
+    let scoredHours = [];
+    let selectedIndex = 0;
+    let activeTab = "forecast";
+    let lastHotspotFetchCoord = "";
+
+    let map = null;
+    let streetLayer = null;
+    let satelliteLayer = null;
+    let isSatellite = false;
+    let centerMarker = null;
+    let hotspotLayer = null;
+
+    const latInput = document.getElementById("latInput");
+    const lonInput = document.getElementById("lonInput");
+    const workerUrlInput = document.getElementById("workerUrlInput");
+    const saveWorkerBtn = document.getElementById("saveWorkerBtn");
+    const settingsToggleBtn = document.getElementById("settingsToggleBtn");
+    const settingsDrawer = document.getElementById("settingsDrawer");
+    const coordSubtitle = document.getElementById("coordSubtitle");
+    const gpsBtn = document.getElementById("gpsBtn");
+    const fetchBtn = document.getElementById("fetchBtn");
+    const tabBtnForecast = document.getElementById("tabBtnForecast");
+    const tabBtnMap = document.getElementById("tabBtnMap");
+    const panelForecast = document.getElementById("panelForecast");
+    const panelMap = document.getElementById("panelMap");
+    const basemapToggleBtn = document.getElementById("basemapToggleBtn");
+    const analyzeHotspotBtn = document.getElementById("analyzeHotspotBtn");
+    const hotspotStatus = document.getElementById("hotspotStatus");
+    const hotspotList = document.getElementById("hotspotList");
+    const mapLinkBanner = document.getElementById("mapLinkBanner");
+    const statusBadge = document.getElementById("statusBadge");
+    const toastBanner = document.getElementById("toastBanner");
+    const presetSpotsEl = document.getElementById("presetSpots");
+    const speciesTabs = document.getElementById("speciesTabs");
+    const barsContainer = document.getElementById("barsContainer");
+
+    // --- WGS84 to GCJ-02 (Amap) accurate conversion ---
+    function outOfChina(lat, lon) {
+      return lon < 72.004 || lon > 137.8347 || lat < 0.8293 || lat > 55.8271;
+    }
+
+    function transformLat(x, y) {
+      let ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * Math.sqrt(Math.abs(x));
+      ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+      ret += ((20.0 * Math.sin(y * Math.PI) + 40.0 * Math.sin((y / 3.0) * Math.PI)) * 2.0) / 3.0;
+      ret += ((160.0 * Math.sin((y / 12.0) * Math.PI) + 320 * Math.sin((y * Math.PI) / 30.0)) * 2.0) / 3.0;
+      return ret;
+    }
+
+    function transformLon(x, y) {
+      let ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * Math.sqrt(Math.abs(x));
+      ret += ((20.0 * Math.sin(6.0 * x * Math.PI) + 20.0 * Math.sin(2.0 * x * Math.PI)) * 2.0) / 3.0;
+      ret += ((20.0 * Math.sin(x * Math.PI) + 40.0 * Math.sin((x / 3.0) * Math.PI)) * 2.0) / 3.0;
+      ret += ((150.0 * Math.sin((x / 12.0) * Math.PI) + 300.0 * Math.sin((x / 30.0) * Math.PI)) * 2.0) / 3.0;
+      return ret;
+    }
+
+    function wgs84ToGcj02(lat, lon) {
+      if (outOfChina(lat, lon)) return [lat, lon];
+      const a = 6378245.0;
+      const ee = 0.00669342162296594323;
+      let dLat = transformLat(lon - 105.0, lat - 35.0);
+      let dLon = transformLon(lon - 105.0, lat - 35.0);
+      const radLat = (lat / 180.0) * Math.PI;
+      let magic = Math.sin(radLat);
+      magic = 1 - ee * magic * magic;
+      const sqrtMagic = Math.sqrt(magic);
+      dLat = (dLat * 180.0) / (((a * (1 - ee)) / (magic * sqrtMagic)) * Math.PI);
+      dLon = (dLon * 180.0) / ((a / sqrtMagic) * Math.cos(radLat) * Math.PI);
+      return [lat + dLat, lon + dLon];
+    }
+
+    function buildAmapUrl(lat, lon, label) {
+      const [gLat, gLon] = wgs84ToGcj02(lat, lon);
+      return `https://uri.amap.com/marker?position=${gLon.toFixed(6)},${gLat.toFixed(6)}&name=${encodeURIComponent(label)}&coordinate=gaode&callnative=1`;
+    }
+
+    function showToast(msg, type = "info") {
+      toastBanner.textContent = msg;
+      toastBanner.className = "rounded-xl px-3.5 py-2 text-xs border " + (
+        type === "warn"
+          ? "bg-[#f6ede3] border-[#e2cbb3] text-[#7a5433]"
+          : type === "error"
+          ? "bg-[#f5e6e6] border-[#dfbfbf] text-[#7c3d3d]"
+          : "bg-[#e8eff2] border-[#c8d8df] text-[#3d5a68]"
+      );
+      toastBanner.classList.remove("hidden");
+    }
+
+    function hideToast() {
+      toastBanner.classList.add("hidden");
+    }
+
+    function updateSubtitle() {
+      const lat = parseFloat(latInput.value) || 22.8170;
+      const lon = parseFloat(lonInput.value) || 108.3665;
+      coordSubtitle.textContent = `${currentSpotName} (${lat.toFixed(4)}, ${lon.toFixed(4)})`;
+    }
+
+    function getWorkerUrl() {
+      const val = workerUrlInput && workerUrlInput.value ? workerUrlInput.value.trim() : "";
+      return val.replace(/\/+$/, "");
+    }
+
+    function loadSavedState() {
+      try {
+        const raw = localStorage.getItem("castwindow_coords_gx");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (typeof parsed.lat === "number" && typeof parsed.lon === "number") {
+            latInput.value = parsed.lat.toFixed(4);
+            lonInput.value = parsed.lon.toFixed(4);
+            if (parsed.name) currentSpotName = parsed.name;
+          }
+        }
+        const savedWorker = localStorage.getItem("castwindow_worker_url");
+        if (savedWorker) workerUrlInput.value = savedWorker;
+      } catch (_) {}
+    }
+
+    function saveCoords(lat, lon) {
+      try {
+        localStorage.setItem("castwindow_coords_gx", JSON.stringify({ lat, lon, name: currentSpotName }));
+      } catch (_) {}
+    }
+
+    settingsToggleBtn.addEventListener("click", () => {
+      settingsDrawer.classList.toggle("hidden");
+    });
+
+    saveWorkerBtn.addEventListener("click", () => {
+      const val = getWorkerUrl();
+      try {
+        localStorage.setItem("castwindow_worker_url", val);
+      } catch (_) {}
+      showToast(val ? "已保存专属转发节点，正在刷新气象与地形" : "已清空自定义节点", "info");
+      const lat = parseFloat(latInput.value);
+      const lon = parseFloat(lonInput.value);
+      loadWeather();
+      if (activeTab === "map" && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+        analyzeNearbyHotspots(lat, lon);
+      }
+    });
+
+    function switchTab(tab) {
+      activeTab = tab;
+      if (tab === "forecast") {
+        panelForecast.classList.remove("hidden");
+        panelMap.classList.add("hidden");
+        tabBtnForecast.className = "min-h-[38px] rounded-xl text-xs font-semibold transition bg-[#fcfbf9] text-[#2f3531] shadow-sm";
+        tabBtnMap.className = "min-h-[38px] rounded-xl text-xs font-semibold transition text-[#6e736e] hover:text-[#2f3531]";
+      } else {
+        panelForecast.classList.add("hidden");
+        panelMap.classList.remove("hidden");
+        tabBtnMap.className = "min-h-[38px] rounded-xl text-xs font-semibold transition bg-[#fcfbf9] text-[#2f3531] shadow-sm";
+        tabBtnForecast.className = "min-h-[38px] rounded-xl text-xs font-semibold transition text-[#6e736e] hover:text-[#2f3531]";
+        if (map) {
+          setTimeout(() => map.invalidateSize(), 60);
+        }
+        const lat = parseFloat(latInput.value);
+        const lon = parseFloat(lonInput.value);
+        const coordKey = `${lat.toFixed(4)},${lon.toFixed(4)}:${currentSpeciesKey}:${selectedIndex}`;
+        if (!Number.isNaN(lat) && !Number.isNaN(lon) && lastHotspotFetchCoord !== coordKey) {
+          analyzeNearbyHotspots(lat, lon);
+        }
+      }
+    }
+
+    tabBtnForecast.addEventListener("click", () => switchTab("forecast"));
+    tabBtnMap.addEventListener("click", () => switchTab("map"));
+
+    function initMap() {
+      if (typeof L === "undefined") {
+        hotspotStatus.textContent = "地图组件加载受限";
+        return;
+      }
+      const lat = parseFloat(latInput.value) || 22.8170;
+      const lon = parseFloat(lonInput.value) || 108.3665;
+
+      streetLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+        { maxZoom: 18, attribution: "Esri" }
+      );
+      satelliteLayer = L.tileLayer(
+        "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        { maxZoom: 18, attribution: "Esri Imagery" }
+      );
+
+      map = L.map("lureMap", {
+        center: [lat, lon],
+        zoom: 14,
+        layers: [streetLayer],
+        zoomControl: true
+      });
+
+      hotspotLayer = L.layerGroup().addTo(map);
+      centerMarker = L.circleMarker([lat, lon], {
+        radius: 7,
+        color: "#2f3531",
+        weight: 2,
+        fillColor: "#6c8478",
+        fillOpacity: 0.9
+      }).addTo(map).bindPopup("当前选中位置");
+
+      map.on("click", (e) => {
+        const clickLat = Number(e.latlng.lat.toFixed(4));
+        const clickLon = Number(e.latlng.lng.toFixed(4));
+        currentSpotName = "自定义地图标点";
+        latInput.value = clickLat;
+        lonInput.value = clickLon;
+        updateSubtitle();
+        updateMapCenter(clickLat, clickLon, false);
+        loadWeather();
+        analyzeNearbyHotspots(clickLat, clickLon);
+      });
+    }
+
+    function updateMapCenter(lat, lon, pan = true) {
+      if (!map || !centerMarker) return;
+      centerMarker.setLatLng([lat, lon]);
+      if (pan) map.setView([lat, lon], 14);
+    }
+
+    basemapToggleBtn.addEventListener("click", () => {
+      if (!map) return;
+      if (isSatellite) {
+        map.removeLayer(satelliteLayer);
+        streetLayer.addTo(map);
+        basemapToggleBtn.textContent = "🛰️ 卫星图";
+      } else {
+        map.removeLayer(streetLayer);
+        satelliteLayer.addTo(map);
+        basemapToggleBtn.textContent = "🗺️ 街道图";
+      }
+      isSatellite = !isSatellite;
+    });
+
+    function haversineM(lat1, lon1, lat2, lon2) {
+      const r = 6371000;
+      const toRad = (d) => (d * Math.PI) / 180;
+      const dp = toRad(lat2 - lat1);
+      const dl = toRad(lon2 - lon1);
+      const a = Math.sin(dp / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dl / 2) ** 2;
+      return 2 * r * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    function segIntersect(p1, p2, q1, q2) {
+      const [x1, y1] = p1, [x2, y2] = p2, [x3, y3] = q1, [x4, y4] = q2;
+      const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+      if (Math.abs(denom) < 1e-12) return null;
+      const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+      const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
+      if (t >= 0 && t <= 1 && u >= 0 && u <= 1) {
+        return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
+      }
+      return null;
+    }
+
+    function turningDeg(a, b, c) {
+      const v1x = b[1] - a[1], v1y = b[0] - a[0];
+      const v2x = c[1] - b[1], v2y = c[0] - b[0];
+      const n1 = Math.hypot(v1x, v1y), n2 = Math.hypot(v2x, v2y);
+      if (n1 < 1e-9 || n2 < 1e-9) return 0;
+      const cosVal = Math.max(-1, Math.min(1, (v1x * v2x + v1y * v2y) / (n1 * n2)));
+      return (Math.acos(cosVal) * 180) / Math.PI;
+    }
+
+    function windBonus(segA, segB, windSpeed, windDir) {
+      const rad = (windDir * Math.PI) / 180;
+      const wx = Math.sin(rad), wy = Math.cos(rad);
+      const dx = segB[1] - segA[1], dy = segB[0] - segA[0];
+      const norm = Math.hypot(dx, dy);
+      if (norm < 1e-9) return [4, "风向中性"];
+      const nx = -dy / norm, ny = dx / norm;
+      const align = Math.abs(nx * wx + ny * wy);
+      if (windSpeed <= 15 && align >= 0.55) return [12, `微风(${windSpeed.toFixed(1)}km/h)吹岸增氧`];
+      if (windSpeed > 18 && align < 0.4) return [10, `大风(${windSpeed.toFixed(1)}km/h)背风易抛投`];
+      return [4, `常规风向(${windSpeed.toFixed(1)}km/h)`];
+    }
+
+    function speciesBiasScore(kind, bias) {
+      if (bias === "open_water") {
+        if (kind === "支流交汇口") return 10;
+        if (kind === "拦水坝/闸口") return 8;
+        return 0;
+      }
+      if (bias === "structure_bottom") {
+        if (kind === "桥梁跨河结构") return 15;
+        if (kind === "河道急弯") return 12;
+        return 0;
+      }
+      if (bias === "shallow_weed") {
+        if (kind === "河道急弯") return 14;
+        if (kind === "支流交汇口") return 8;
+        return 0;
+      }
+      if (bias === "stream_rapid") {
+        if (kind === "拦水坝/闸口" || kind === "支流交汇口") return 12;
+        if (kind === "河道急弯") return 8;
+        return 0;
+      }
+      return 0;
+    }
+
+    function renderHotspots(spots) {
+      if (hotspotLayer) hotspotLayer.clearLayers();
+      hotspotList.innerHTML = "";
+      const sp = SPECIES_DB[currentSpeciesKey];
+      const curItem = scoredHours[selectedIndex];
+      const timeTag = curItem ? curItem.label : "当前";
+      const lureTip = curItem ? curItem.tactic.recommended_lures[0] : sp.high_activity_tactic.recommended_lures[0];
+
+      if (spots.length === 0) {
+        hotspotList.innerHTML = `<div class="text-[11px] text-[#6e736e] py-1">该点周边 1.2km 未检测到显著交汇口、主干桥梁或急弯，可切换卫星图直接观察岸线结构。</div>`;
+        return;
+      }
+
+      spots.forEach((spot, idx) => {
+        const amapUrl = buildAmapUrl(spot.lat, spot.lon, `${sp.name}标点-${spot.kind}`);
+        if (hotspotLayer && typeof L !== "undefined") {
+          const marker = L.circleMarker([spot.lat, spot.lon], {
+            radius: 7,
+            color: "#ffffff",
+            weight: 1.5,
+            fillColor: spot.score >= 85 ? "#6f8f7d" : "#7b93a3",
+            fillOpacity: 0.95
+          }).bindPopup(
+            `<div style="font-size:12px;line-height:1.5">` +
+            `<b>#${idx + 1} ${spot.kind} (${spot.score}分)</b><br/>` +
+            `${spot.reason}<br/>` +
+            `<span style="color:#496356">${timeTag} 推荐 ${sp.name}: ${lureTip}</span><br/>` +
+            `<a href="${amapUrl}" target="_blank" rel="noopener" style="display:inline-block;margin-top:4px;color:#0284c7;font-weight:600">🧭 打开高德地图导航</a>` +
+            `</div>`
+          );
+          hotspotLayer.addLayer(marker);
+        }
+
+        const card = document.createElement("div");
+        card.className = "px-3 py-2.5 rounded-xl bg-[#f4f1ec] border border-[#e3ddd3] flex items-center justify-between gap-2";
+
+        const infoBtn = document.createElement("button");
+        infoBtn.type = "button";
+        infoBtn.className = "text-left flex-1 min-w-0 focus:outline-none";
+        infoBtn.innerHTML = `
+          <div class="flex items-center gap-2 text-xs font-semibold text-[#2f3531]">
+            <span>#${idx + 1} ${spot.kind}</span>
+            <span class="text-[#4e705e]">${spot.score}分</span>
+          </div>
+          <div class="text-[11px] text-[#59605b] mt-0.5 truncate">${spot.reason}</div>
+        `;
+        infoBtn.addEventListener("click", () => {
+          if (map) map.setView([spot.lat, spot.lon], 16);
+        });
+
+        const navLink = document.createElement("a");
+        navLink.href = amapUrl;
+        navLink.target = "_blank";
+        navLink.rel = "noopener noreferrer";
+        navLink.className = "shrink-0 min-h-[32px] px-2.5 py-1 rounded-lg bg-[#fcfbf9] hover:bg-[#e6ece8] text-[#496356] border border-[#cad6ce] text-[11px] font-semibold flex items-center gap-1 transition";
+        navLink.textContent = "🧭 高德导航";
+
+        card.appendChild(infoBtn);
+        card.appendChild(navLink);
+        hotspotList.appendChild(card);
+      });
+    }
+
+    async function analyzeNearbyHotspots(lat, lon) {
+      const sp = SPECIES_DB[currentSpeciesKey];
+      const curItem = scoredHours[selectedIndex];
+      const windSpeed = curItem ? curItem.wind : 8.0;
+      const windDir = curItem ? (curItem.windDir || 120) : 120;
+      const timeLabel = curItem ? curItem.label : "当前时段";
+      mapLinkBanner.textContent = `已联动：${timeLabel} · ${sp.name} · 风速 ${windSpeed.toFixed(1)}km/h`;
+      hotspotStatus.textContent = "正在分析周边 1.2km 河道地形...";
+
+      const query = `[out:json][timeout:30];(way["waterway"~"river|stream|canal"](around:1200,${lat},${lon});way["bridge"="yes"]["highway"~"motorway|trunk|primary|secondary|tertiary"](around:1200,${lat},${lon});node["waterway"~"weir|dam"](around:1200,${lat},${lon}););out geom;`;
+
+      const workerBase = getWorkerUrl();
+      const endpoints = [];
+      if (workerBase) {
+        endpoints.push(`${workerBase}/?target=overpass`);
+      } else {
+        endpoints.push("/api/weather?target=overpass");
+      }
+      endpoints.push(
+        "https://overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+        "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+      );
+
+      try {
+        let data = null;
+        let lastErr = null;
+        for (const ep of endpoints) {
+          try {
+            const resp = await fetch(ep, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+              body: "data=" + encodeURIComponent(query)
+            });
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            data = await resp.json();
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (!data) throw lastErr || new Error("All endpoints failed");
+
+        lastHotspotFetchCoord = `${lat.toFixed(4)},${lon.toFixed(4)}:${currentSpeciesKey}:${selectedIndex}`;
+        const waterways = [], bridges = [], weirs = [];
+        const nodes = {};
+
+        (data.elements || []).forEach((el) => {
+          if (el.type === "node") {
+            nodes[el.id] = [el.lat, el.lon];
+            if (el.tags && (el.tags.waterway === "weir" || el.tags.waterway === "dam")) weirs.push(el);
+          } else if (el.type === "way") {
+            const geom = el.geometry || [];
+            const nids = el.nodes || [];
+            nids.forEach((nid, i) => { if (geom[i]) nodes[nid] = [geom[i].lat, geom[i].lon]; });
+            if (el.tags && el.tags.waterway) waterways.push(el);
+            if (el.tags && el.tags.bridge === "yes") bridges.push(el);
+          }
+        });
+
+        const spots = [];
+        const nodeWays = {};
+        waterways.forEach((w) => {
+          const wName = (w.tags && (w.tags.name || w.tags.waterway)) || "河道";
+          new Set(w.nodes || []).forEach((nid) => {
+            if (!nodeWays[nid]) nodeWays[nid] = [];
+            nodeWays[nid].push(wName);
+          });
+        });
+
+        Object.entries(nodeWays).forEach(([nid, names]) => {
+          if (names.length >= 2 && nodes[nid]) {
+            const bias = speciesBiasScore("支流交汇口", sp.spot_bias);
+            spots.push({
+              kind: "支流交汇口",
+              lat: nodes[nid][0],
+              lon: nodes[nid][1],
+              score: Math.min(99, 82 + bias),
+              reason: `水系交汇 (${[...new Set(names)].join(" + ")})，溶氧与饵鱼密集`
+            });
+          }
+        });
+
+        weirs.forEach((wn) => {
+          const bias = speciesBiasScore("拦水坝/闸口", sp.spot_bias);
+          spots.push({
+            kind: "拦水坝/闸口",
+            lat: wn.lat,
+            lon: wn.lon,
+            score: Math.min(99, 80 + bias),
+            reason: "跌水洄流区，溶氧高且下泄饵鱼集中"
+          });
+        });
+
+        bridges.forEach((b) => {
+          const bPts = (b.nodes || []).map((id) => nodes[id]).filter(Boolean);
+          const bName = (b.tags && b.tags.name) || "跨河桥梁";
+          waterways.forEach((w) => {
+            const wPts = (w.nodes || []).map((id) => nodes[id]).filter(Boolean);
+            for (let i = 0; i < bPts.length - 1; i++) {
+              for (let j = 0; j < wPts.length - 1; j++) {
+                const hit = segIntersect(bPts[i], bPts[i + 1], wPts[j], wPts[j + 1]);
+                if (hit) {
+                  const [wb, wNote] = windBonus(wPts[j], wPts[j + 1], windSpeed, windDir);
+                  const bias = speciesBiasScore("桥梁跨河结构", sp.spot_bias);
+                  spots.push({
+                    kind: "桥梁跨河结构",
+                    lat: hit[0],
+                    lon: hit[1],
+                    score: Math.min(99, 68 + wb + bias),
+                    reason: `${bName} 桥墩阴影与洄水；${wNote}`
+                  });
+                }
+              }
+            }
+          });
+        });
+
+        waterways.forEach((w) => {
+          const wPts = (w.nodes || []).map((id) => nodes[id]).filter(Boolean);
+          const wName = (w.tags && w.tags.name) || "河道";
+          for (let i = 1; i < wPts.length - 1; i++) {
+            const ang = turningDeg(wPts[i - 1], wPts[i], wPts[i + 1]);
+            if (ang >= 30) {
+              const [wb, wNote] = windBonus(wPts[i - 1], wPts[i + 1], windSpeed, windDir);
+              const bias = speciesBiasScore("河道急弯", sp.spot_bias);
+              spots.push({
+                kind: "河道急弯",
+                lat: wPts[i][0],
+                lon: wPts[i][1],
+                score: Math.min(99, 62 + wb + bias + Math.min(8, Math.floor(ang / 12))),
+                reason: `${wName} ${ang.toFixed(0)}° 弯道深槽/缓水区；${wNote}`
+              });
+            }
+          }
+        });
+
+        const deduped = [];
+        spots.sort((a, b) => b.score - a.score).forEach((s) => {
+          if (deduped.every((d) => haversineM(s.lat, s.lon, d.lat, d.lon) > 80)) {
+            deduped.push(s);
+          }
+        });
+
+        const top = deduped.slice(0, 6);
+        renderHotspots(top);
+        hotspotStatus.textContent = `已按 ${sp.name} 习性排序，共 ${top.length} 个候选标点`;
+      } catch (err) {
+        hotspotStatus.textContent = "地形接口暂时繁忙，可点击 ⚙️ 填入 Worker 节点或切卫星图查看";
+        renderHotspots([]);
+      }
+    }
+
+    function renderPresetSpots() {
+      presetSpotsEl.innerHTML = "";
+      PRESET_SPOTS.forEach((spot) => {
+        const active = spot.name === currentSpotName;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = spot.name;
+        btn.className = "shrink-0 min-h-[34px] px-2.5 rounded-xl text-[11px] font-medium border transition " + (
+          active
+            ? "bg-[#e6ece8] text-[#496356] border-[#6c8478] font-semibold"
+            : "bg-[#fcfbf9] hover:bg-[#e9e4dc] text-[#525853] border-[#ddd6cb]"
+        );
+        btn.addEventListener("click", () => {
+          currentSpotName = spot.name;
+          latInput.value = spot.lat.toFixed(4);
+          lonInput.value = spot.lon.toFixed(4);
+          updateSubtitle();
+          renderPresetSpots();
+          updateMapCenter(spot.lat, spot.lon, true);
+          loadWeather();
+          if (activeTab === "map") analyzeNearbyHotspots(spot.lat, spot.lon);
+        });
+        presetSpotsEl.appendChild(btn);
+      });
+    }
+
+    function scorePressure(p, delta3h) {
+      if (delta3h > 0.5 && delta3h <= 3.0) return [30, `3h 气压稳步回升 (+${delta3h.toFixed(1)} hPa)，开口窗口极佳`];
+      if (delta3h >= -1.5 && delta3h <= 1.5 && p >= 1005) return [28, "气压平稳且偏高，鱼群活性稳定"];
+      if (delta3h >= -2.5 && delta3h < -0.5) return [24, `3h 气压小幅缓降 (${delta3h.toFixed(1)} hPa)，阴天前常有抢食窗口`];
+      if (delta3h < -3.0) return [10, `3h 气压骤降 (${delta3h.toFixed(1)} hPa)，鱼群易闷底停口`];
+      if (p < 998) return [12, `气压偏低 (${p.toFixed(0)} hPa)，溶氧偏低建议搜深水`];
+      return [20, `气压常规 (${p.toFixed(0)} hPa)`];
+    }
+
+    function scoreWind(wind, tolerance) {
+      if (wind >= 4 && wind <= 14) return [25, `微风 (${wind.toFixed(1)} km/h) 利于水表增氧且方便抛投`];
+      if (wind < 4) return [19, `微弱风/静水 (${wind.toFixed(1)} km/h)，水面透明建议细线轻饵`];
+      if (wind <= tolerance) return [16, `风力偏大 (${wind.toFixed(1)} km/h)，优先用重克重远投饵`];
+      return [6, `大风 (${wind.toFixed(1)} km/h) 严重影响抛投精度与控线`];
+    }
+
+    function scoreTemp(temp, tMin, tMax) {
+      if (temp >= tMin && temp <= tMax) return [20, `气温 ${temp.toFixed(1)}°C 处于 ${tMin}–${tMax}°C 适口区间`];
+      const diff = Math.min(Math.abs(temp - tMin), Math.abs(temp - tMax));
+      if (diff <= 4) return [13, `气温 ${temp.toFixed(1)}°C 略偏离适口区`];
+      return [6, `气温 ${temp.toFixed(1)}°C 偏离适口区较大，鱼活性偏低`];
+    }
+
+    function scoreLightAndHour(hour, cloud) {
+      const isPrime = (hour >= 5 && hour <= 8) || (hour >= 17 && hour <= 20);
+      const isOvercast = cloud >= 55;
+      if (isPrime) return [15, `${String(hour).padStart(2, "0")}:00 处于晨昏黄金窗口期`, true];
+      if (isOvercast) return [13, `云量 ${cloud.toFixed(0)}% 光线柔和，中上层仍有巡游可能`, true];
+      if (hour >= 11 && hour <= 15 && cloud < 35) return [5, "正午强光直射，鱼群多压底或躲入障碍阴影区", false];
+      return [10, "常规光照时段", false];
+    }
+
+    function scoreRain(rain) {
+      if (rain >= 15 && rain <= 45) return [10, `降水概率 ${rain.toFixed(0)}%（微雨预期），溶氧高窗口佳`];
+      if (rain < 15) return [8, "无明显降水干扰"];
+      if (rain <= 70) return [5, `降水概率 ${rain.toFixed(0)}%，注意防雨与安全`];
+      return [1, `高降水风险 (${rain.toFixed(0)}%)，不建议涉水或空旷作钓`];
+    }
+
+    function computeScores() {
+      const sp = SPECIES_DB[currentSpeciesKey];
+      scoredHours = hourlyWeather.map((w, idx) => {
+        const prevIdx = Math.max(0, idx - 3);
+        const delta3h = w.pressure - hourlyWeather[prevIdx].pressure;
+        const [ps, pm] = scorePressure(w.pressure, delta3h);
+        const [ws, wm] = scoreWind(w.wind, sp.wind_tolerance_kmh);
+        const [ts, tm] = scoreTemp(w.temp, sp.ideal_temp_min, sp.ideal_temp_max);
+        const [ls, lm, softLight] = scoreLightAndHour(w.hour, w.cloud);
+        const [rs, rm] = scoreRain(w.rain);
+
+        const total = Math.max(0, Math.min(100, ps + ws + ts + ls + rs));
+        const tactic = (total >= 70 || softLight) ? sp.high_activity_tactic : sp.low_activity_tactic;
+
+        return {
+          ...w,
+          delta3h: Number(delta3h.toFixed(1)),
+          score: total,
+          reasons: [pm, wm, tm, lm, rm],
+          tactic
+        };
+      });
+
+      if (scoredHours.length > 0) {
+        let bestIdx = 0;
+        scoredHours.forEach((h, i) => {
+          if (h.score > scoredHours[bestIdx].score) bestIdx = i;
+        });
+        selectedIndex = bestIdx;
+      }
+    }
+
+    function renderSpeciesTabs() {
+      speciesTabs.innerHTML = "";
+      Object.keys(SPECIES_DB).forEach((key) => {
+        const active = key === currentSpeciesKey;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = key;
+        btn.className = "shrink-0 min-h-[34px] px-3.5 rounded-full text-xs font-semibold border transition " + (
+          active
+            ? "bg-[#6c8478] text-white border-[#5b7266] shadow-sm"
+            : "bg-[#fcfbf9] text-[#525853] border-[#ddd6cb] hover:border-[#b9b0a2]"
+        );
+        btn.addEventListener("click", () => {
+          currentSpeciesKey = key;
+          renderSpeciesTabs();
+          computeScores();
+          renderAll();
+          if (activeTab === "map") {
+            const lat = parseFloat(latInput.value);
+            const lon = parseFloat(lonInput.value);
+            if (!Number.isNaN(lat) && !Number.isNaN(lon)) analyzeNearbyHotspots(lat, lon);
+          }
+        });
+        speciesTabs.appendChild(btn);
+      });
+    }
+
+    function colorFor(score) {
+      if (score >= 75) return "#6f8f7d";
+      if (score >= 55) return "#7b93a3";
+      return "#c8a28a";
+    }
+
+    function renderDetail(item) {
+      if (!item) return;
+      document.getElementById("detailTitle").textContent = `${item.label} · 评分 ${item.score}/100`;
+      document.getElementById("detailActivity").textContent = item.tactic.activity_level;
+
+      const tags = [
+        `气压 ${item.pressure.toFixed(0)}hPa (${item.delta3h >= 0 ? "+" : ""}${item.delta3h})`,
+        `气温 ${item.temp.toFixed(1)}°C`,
+        `风速 ${item.wind.toFixed(1)}km/h`,
+        `云量 ${item.cloud.toFixed(0)}%`,
+        `降水 ${item.rain.toFixed(0)}%`
+      ];
+      document.getElementById("weatherStrip").innerHTML = tags
+        .map((t) => `<span class="px-2 py-0.5 rounded-lg bg-[#f4f1ec] border border-[#e3ddd3] text-[#525853]">${t}</span>`)
+        .join("");
+
+      document.getElementById("tacticLayer").textContent = item.tactic.target_layer;
+      document.getElementById("tacticStructure").textContent = item.tactic.target_structure;
+      document.getElementById("tacticLures").innerHTML = item.tactic.recommended_lures
+        .map((l) => `<span class="px-2.5 py-1 rounded-full bg-[#e8eff2] text-[#425b69] border border-[#cad8df] font-medium">${l}</span>`)
+        .join("");
+      document.getElementById("tacticTechnique").textContent = item.tactic.retrieve_technique;
+      document.getElementById("detailReasons").innerHTML = item.reasons
+        .map((r) => `<li>${r}</li>`)
+        .join("");
+    }
+
+    function renderAll() {
+      const sp = SPECIES_DB[currentSpeciesKey];
+      document.getElementById("speciesLayer").textContent = sp.water_layer;
+      document.getElementById("speciesHabitat").textContent = sp.habitat;
+
+      if (scoredHours.length === 0) return;
+
+      let best = scoredHours[0];
+      scoredHours.forEach((h) => {
+        if (h.score > best.score) best = h;
+      });
+      document.getElementById("bestWindowLabel").textContent = `${best.label} (${best.score}分)`;
+
+      barsContainer.innerHTML = "";
+      scoredHours.forEach((item, idx) => {
+        const col = document.createElement("button");
+        col.type = "button";
+        const isSelected = idx === selectedIndex;
+        col.className = "flex flex-col items-center shrink-0 w-7 focus:outline-none";
+        const barHeight = Math.max(4, Math.round((item.score / 100) * 84));
+        const timeText = idx % 3 === 0 ? item.hourLabel : "&nbsp;";
+        col.innerHTML = `
+          <span class="text-[9px] leading-3 mb-1 ${isSelected ? "text-[#2f3531] font-bold" : "text-[#7c817c]"}">${item.score}</span>
+          <div class="w-4 rounded-t transition-all ${isSelected ? "ring-2 ring-[#353a36]" : "opacity-90"}"
+               style="height:${barHeight}px;background:${colorFor(item.score)}"></div>
+          <span class="text-[9px] leading-4 h-4 text-[#7c817c] mt-1 block">${timeText}</span>
+        `;
+        col.addEventListener("click", () => {
+          selectedIndex = idx;
+          renderAll();
+        });
+        barsContainer.appendChild(col);
+      });
+
+      renderDetail(scoredHours[selectedIndex]);
+    }
+
+    function buildSampleWeather() {
+      const now = new Date();
+      now.setMinutes(0, 0, 0);
+      const list = [];
+      for (let i = 0; i < 48; i++) {
+        const dt = new Date(now.getTime() + i * 3600 * 1000);
+        const h = dt.getHours();
+        const mm = String(dt.getMonth() + 1).padStart(2, "0");
+        const dd = String(dt.getDate()).padStart(2, "0");
+        const hh = String(h).padStart(2, "0");
+        list.push({
+          label: `${mm}-${dd} ${hh}:00`,
+          hourLabel: `${hh}h`,
+          hour: h,
+          temp: 23 + Math.sin((h - 6) * Math.PI / 12) * 4,
+          pressure: 1011 + Math.sin(i / 6) * 2.5,
+          wind: 7 + Math.abs(Math.cos(i / 4)) * 6,
+          windDir: 120,
+          cloud: (h >= 11 && h <= 15) ? 25 : 65,
+          rain: 20
+        });
+      }
+      return list;
+    }
+
+    async function loadWeather() {
+      const lat = parseFloat(latInput.value);
+      const lon = parseFloat(lonInput.value);
+      if (Number.isNaN(lat) || Number.isNaN(lon)) {
+        showToast("请输入有效的经纬度数值", "error");
+        return;
+      }
+
+      saveCoords(lat, lon);
+      statusBadge.textContent = "拉取气象中...";
+      hideToast();
+
+      const workerBase = getWorkerUrl();
+      const url = workerBase
+        ? `${workerBase}/?latitude=${lat}&longitude=${lon}`
+        : `/api/weather?latitude=${lat}&longitude=${lon}`;
+
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const data = await resp.json();
+        const h = data.hourly;
+        const nowFloor = new Date();
+        nowFloor.setMinutes(0, 0, 0);
+        const nowMs = nowFloor.getTime();
+        const futureList = [];
+        for (let i = 0; i < h.time.length; i++) {
+          const dt = new Date(h.time[i]);
+          if (dt.getTime() < nowMs) continue;
+          const mm = String(dt.getMonth() + 1).padStart(2, "0");
+          const dd = String(dt.getDate()).padStart(2, "0");
+          const hh = String(dt.getHours()).padStart(2, "0");
+          futureList.push({
+            label: `${mm}-${dd} ${hh}:00`,
+            hourLabel: `${hh}h`,
+            hour: dt.getHours(),
+            temp: Number(h.temperature_2m[i]),
+            pressure: Number(h.surface_pressure[i]),
+            wind: Number(h.wind_speed_10m[i]),
+            windDir: Number(h.wind_direction_10m ? h.wind_direction_10m[i] : 120),
+            cloud: Number(h.cloud_cover[i]),
+            rain: Number(h.precipitation_probability[i])
+          });
+          if (futureList.length >= 48) break;
+        }
+        hourlyWeather = futureList;
+        statusBadge.textContent = "实时气象";
+      } catch (err) {
+        hourlyWeather = buildSampleWeather();
+        statusBadge.textContent = "示例模式";
+        showToast("无法直连气象接口（点右上角 ⚙️ 填入你的 Cloudflare Worker 节点即可直连），当前展示示例数据。", "warn");
+      }
+
+      computeScores();
+      renderAll();
+    }
+
+    gpsBtn.addEventListener("click", () => {
+      if (!navigator.geolocation) {
+        showToast("当前浏览器不支持 GPS 定位，请点选常用水系或在地图上选点", "warn");
+        return;
+      }
+      statusBadge.textContent = "定位中...";
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const lat = Number(pos.coords.latitude.toFixed(4));
+          const lon = Number(pos.coords.longitude.toFixed(4));
+          currentSpotName = "GPS 当前位置";
+          latInput.value = lat;
+          lonInput.value = lon;
+          updateSubtitle();
+          renderPresetSpots();
+          updateMapCenter(lat, lon, true);
+          showToast(`定位成功: (${lat}, ${lon})`, "info");
+          loadWeather();
+          if (activeTab === "map") analyzeNearbyHotspots(lat, lon);
+        },
+        () => {
+          statusBadge.textContent = "定位未授权";
+          showToast("无法获取定位权限，请点选上方常用水系或切到“地图找标点”直接点水面。", "warn");
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+
+    fetchBtn.addEventListener("click", () => {
+      const lat = parseFloat(latInput.value);
+      const lon = parseFloat(lonInput.value);
+      if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+        currentSpotName = "手动输入坐标";
+        updateSubtitle();
+        renderPresetSpots();
+        updateMapCenter(lat, lon, true);
+        loadWeather();
+        if (activeTab === "map") analyzeNearbyHotspots(lat, lon);
+      }
+    });
+
+    analyzeHotspotBtn.addEventListener("click", () => {
+      const lat = parseFloat(latInput.value);
+      const lon = parseFloat(lonInput.value);
+      if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+        analyzeNearbyHotspots(lat, lon);
+      }
+    });
+
+    // Init
+    loadSavedState();
+    updateSubtitle();
+    initMap();
+    renderPresetSpots();
+    renderSpeciesTabs();
+    loadWeather();
+  </script>
+</body>
+</html>
