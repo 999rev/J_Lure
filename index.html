@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>J_lure</title>
+  <title>castwindow · 南宁路亚窗口与标点助手</title>
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -29,7 +29,7 @@
       <div>
         <h1 class="text-lg font-bold tracking-tight text-[#2f3531] flex items-center gap-1.5">
           <span>🎣</span>
-          <span>J_lure</span>
+          <span>J_Lure</span>
         </h1>
         <p id="coordSubtitle" class="text-[11px] text-[#6e736e]">南宁 · 邕江市区 (22.8170, 108.3665)</p>
       </div>
@@ -114,6 +114,15 @@
           <span class="text-[10px] text-[#6e736e]">绿≥75 · 蓝≥55 · 橙&lt;55</span>
         </div>
         <div id="barsContainer" class="flex items-end gap-1.5 h-32 overflow-x-auto no-scrollbar pt-3 pb-1"></div>
+      </section>
+
+      <!-- Recommended Best Species for Selected Time & Location -->
+      <section class="bg-[#fcfbf9] border border-[#e3ddd3] rounded-2xl p-3 space-y-2 shadow-sm">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-[#2f3531]">🏆 当前时段 &amp; 位置最佳作钓鱼种</span>
+          <span id="recBasisLabel" class="text-[10px] text-[#6e736e]">综合气象 + 水域特征</span>
+        </div>
+        <div id="recommendedSpeciesRow" class="grid grid-cols-3 gap-1.5"></div>
       </section>
 
       <!-- Unified Strategy Card -->
@@ -427,6 +436,7 @@
     let selectedIndex = 0;
     let activeTab = "forecast";
     let lastHotspotFetchCoord = "";
+    let terrainSignals = { hasStream: false, hasRiver: true, hasBridge: false, hasWeir: false };
 
     let map = null;
     let streetLayer = null;
@@ -934,8 +944,15 @@
           }
         });
 
+        terrainSignals = {
+          hasStream: waterways.some((w) => w.tags && w.tags.waterway === "stream"),
+          hasRiver: waterways.some((w) => w.tags && w.tags.waterway === "river"),
+          hasBridge: bridges.length > 0,
+          hasWeir: weirs.length > 0
+        };
         const top = deduped.slice(0, 6);
         renderHotspots(top);
+        renderRecommendedSpecies();
         hotspotStatus.textContent = `已按 ${sp.name} 习性排序，共 ${top.length} 个候选标点`;
       } catch (err) {
         hotspotStatus.textContent = "地形接口暂时繁忙，可点击 ⚙️ 填入 Worker 节点或切卫星图查看";
@@ -970,42 +987,142 @@
     }
 
     function scorePressure(p, delta3h) {
-      if (delta3h > 0.5 && delta3h <= 3.0) return [30, `3h 气压稳步回升 (+${delta3h.toFixed(1)} hPa)，开口窗口极佳`];
-      if (delta3h >= -1.5 && delta3h <= 1.5 && p >= 1005) return [28, "气压平稳且偏高，鱼群活性稳定"];
-      if (delta3h >= -2.5 && delta3h < -0.5) return [24, `3h 气压小幅缓降 (${delta3h.toFixed(1)} hPa)，阴天前常有抢食窗口`];
-      if (delta3h < -3.0) return [10, `3h 气压骤降 (${delta3h.toFixed(1)} hPa)，鱼群易闷底停口`];
-      if (p < 998) return [12, `气压偏低 (${p.toFixed(0)} hPa)，溶氧偏低建议搜深水`];
-      return [20, `气压常规 (${p.toFixed(0)} hPa)`];
+      if (delta3h >= 0.8 && delta3h <= 3.0) return [28, `3h 气压稳步回升 (+${delta3h.toFixed(1)} hPa)，开口窗口极佳`];
+      if (delta3h >= -2.2 && delta3h <= -0.6) return [22, `3h 气压小幅缓降 (${delta3h.toFixed(1)} hPa)，阴天前常有抢食窗口`];
+      if (delta3h < -2.5) return [8, `3h 气压骤降 (${delta3h.toFixed(1)} hPa)，鱼群易闷底停口`];
+      if (p < 998) return [10, `气压偏低 (${p.toFixed(0)} hPa)，溶氧偏低建议搜深水`];
+      if (p >= 1005) return [18, `气压平稳 (${p.toFixed(0)} hPa)，无明显涨跌刺激`];
+      return [15, `气压常规 (${p.toFixed(0)} hPa)`];
     }
 
     function scoreWind(wind, tolerance) {
-      if (wind >= 4 && wind <= 14) return [25, `微风 (${wind.toFixed(1)} km/h) 利于水表增氧且方便抛投`];
-      if (wind < 4) return [19, `微弱风/静水 (${wind.toFixed(1)} km/h)，水面透明建议细线轻饵`];
-      if (wind <= tolerance) return [16, `风力偏大 (${wind.toFixed(1)} km/h)，优先用重克重远投饵`];
-      return [6, `大风 (${wind.toFixed(1)} km/h) 严重影响抛投精度与控线`];
+      if (wind >= 5 && wind <= 13) return [22, `微风 (${wind.toFixed(1)} km/h) 利于水表增氧且方便抛投`];
+      if (wind < 5) return [13, `静水/微弱风 (${wind.toFixed(1)} km/h)，水清鱼警觉建议细线轻饵`];
+      if (wind <= tolerance) return [12, `风力偏大 (${wind.toFixed(1)} km/h)，优先用重克重远投饵`];
+      return [4, `大风 (${wind.toFixed(1)} km/h) 严重影响抛投精度与控线`];
     }
 
     function scoreTemp(temp, tMin, tMax) {
-      if (temp >= tMin && temp <= tMax) return [20, `气温 ${temp.toFixed(1)}°C 处于 ${tMin}–${tMax}°C 适口区间`];
+      if (temp >= tMin + 2 && temp <= tMax - 2) return [20, `气温 ${temp.toFixed(1)}°C 处于最适核心区间`];
+      if (temp >= tMin && temp <= tMax) return [15, `气温 ${temp.toFixed(1)}°C 处于 ${tMin}–${tMax}°C 适口区间`];
       const diff = Math.min(Math.abs(temp - tMin), Math.abs(temp - tMax));
-      if (diff <= 4) return [13, `气温 ${temp.toFixed(1)}°C 略偏离适口区`];
-      return [6, `气温 ${temp.toFixed(1)}°C 偏离适口区较大，鱼活性偏低`];
+      if (diff <= 4) return [9, `气温 ${temp.toFixed(1)}°C 略偏离适口区`];
+      return [3, `气温 ${temp.toFixed(1)}°C 偏离适口区较大，鱼活性偏低`];
     }
 
     function scoreLightAndHour(hour, cloud) {
       const isPrime = (hour >= 5 && hour <= 8) || (hour >= 17 && hour <= 20);
-      const isOvercast = cloud >= 55;
-      if (isPrime) return [15, `${String(hour).padStart(2, "0")}:00 处于晨昏黄金窗口期`, true];
-      if (isOvercast) return [13, `云量 ${cloud.toFixed(0)}% 光线柔和，中上层仍有巡游可能`, true];
-      if (hour >= 11 && hour <= 15 && cloud < 35) return [5, "正午强光直射，鱼群多压底或躲入障碍阴影区", false];
-      return [10, "常规光照时段", false];
+      const isOvercast = cloud >= 65;
+      if (isPrime) return [20, `${String(hour).padStart(2, "0")}:00 处于晨昏黄金窗口期`, true];
+      if (isOvercast) return [16, `云量 ${cloud.toFixed(0)}% 光线柔和，中上层仍有巡游可能`, true];
+      if (hour >= 11 && hour <= 15 && cloud < 40) return [3, "正午强光直射，鱼群多压底或躲入障碍阴影区", false];
+      return [9, "常规光照过渡时段", false];
     }
 
     function scoreRain(rain) {
-      if (rain >= 15 && rain <= 45) return [10, `降水概率 ${rain.toFixed(0)}%（微雨预期），溶氧高窗口佳`];
-      if (rain < 15) return [8, "无明显降水干扰"];
-      if (rain <= 70) return [5, `降水概率 ${rain.toFixed(0)}%，注意防雨与安全`];
-      return [1, `高降水风险 (${rain.toFixed(0)}%)，不建议涉水或空旷作钓`];
+      if (rain >= 20 && rain <= 45) return [10, `降水概率 ${rain.toFixed(0)}%（微雨预期），溶氧高窗口佳`];
+      if (rain < 20) return [6, "晴干无明显降水增氧"];
+      if (rain <= 70) return [4, `降水概率 ${rain.toFixed(0)}%，注意防雨与安全`];
+      return [0, `高降水风险 (${rain.toFixed(0)}%)，不建议涉水或空旷作钓`];
+    }
+
+    function locationSpeciesBonus(speciesKey, spotName, lat) {
+      let bonus = 0;
+      const tags = [];
+      const name = spotName || "";
+      if (name.includes("良凤江") || terrainSignals.hasStream || terrainSignals.hasWeir) {
+        if (["马口鱼", "军鱼", "黑鱼", "罗非鱼"].includes(speciesKey)) {
+          bonus += 5;
+          tags.push("溪流/支流生境契合");
+        }
+      }
+      if (name.includes("大王滩") || lat < 22.68) {
+        if (["黑鲈", "鳜鱼", "翘嘴", "太阳鱼"].includes(speciesKey)) {
+          bonus += 5;
+          tags.push("水库库湾结构契合");
+        }
+      }
+      if (name.includes("邕江") || name.includes("柳江") || name.includes("漓江") || terrainSignals.hasRiver) {
+        if (["翘嘴", "鳡鱼", "红眼鳟", "鳜鱼"].includes(speciesKey)) {
+          bonus += 4;
+          tags.push("大江主河道契合");
+        }
+      }
+      if (terrainSignals.hasBridge && ["鳜鱼", "黑鲈", "红眼鳟"].includes(speciesKey)) {
+        bonus += 4;
+      }
+      return [bonus, tags[0] || "常规水域匹配"];
+    }
+
+    function timeHabitBonus(speciesKey, hour, cloud, temp) {
+      // 昼伏夜出型（鳜鱼）
+      if (speciesKey === "鳜鱼") {
+        if (hour >= 18 || hour <= 6 || cloud >= 65) return [7, "弱光/夜间鳜鱼活性上升"];
+        if (hour >= 11 && hour <= 15 && cloud < 35) return [-6, "正午强光鳜鱼多躲石缝"];
+      }
+      // 喜阳暖水型（罗非鱼、黑鱼、军鱼）
+      if (["罗非鱼", "黑鱼", "军鱼"].includes(speciesKey)) {
+        if (temp >= 22 && hour >= 9 && hour <= 17) return [6, "白天暖水时段活性佳"];
+        if (temp < 17) return [-8, "气温偏低活性下降"];
+      }
+      // 晨昏敞水炸水型（翘嘴、鳡鱼、红眼鳟）
+      if (["翘嘴", "鳡鱼", "红眼鳟"].includes(speciesKey)) {
+        if ((hour >= 5 && hour <= 8) || (hour >= 17 && hour <= 20)) return [7, "晨昏窗口易上浮追饵"];
+      }
+      return [0, ""];
+    }
+
+    function scoreSingleHourForSpecies(w, delta3h, sp) {
+      const [ps] = scorePressure(w.pressure, delta3h);
+      const [ws] = scoreWind(w.wind, sp.wind_tolerance_kmh);
+      const [ts] = scoreTemp(w.temp, sp.ideal_temp_min, sp.ideal_temp_max);
+      const [ls] = scoreLightAndHour(w.hour, w.cloud);
+      const [rs] = scoreRain(w.rain);
+      return ps + ws + ts + ls + rs;
+    }
+
+    function renderRecommendedSpecies() {
+      const row = document.getElementById("recommendedSpeciesRow");
+      const basisEl = document.getElementById("recBasisLabel");
+      if (!row || !scoredHours[selectedIndex]) return;
+
+      const cur = scoredHours[selectedIndex];
+      const lat = parseFloat(latInput.value) || 22.8170;
+      const ranked = Object.keys(SPECIES_DB).map((key) => {
+        const sp = SPECIES_DB[key];
+        const baseScore = scoreSingleHourForSpecies(cur, cur.delta3h, sp);
+        const [locBonus, locNote] = locationSpeciesBonus(key, currentSpotName, lat);
+        const [timeBonus, timeNote] = timeHabitBonus(key, cur.hour, cur.cloud, cur.temp);
+        const total = Math.max(0, Math.min(96, baseScore + locBonus + timeBonus));
+        return { key, total, note: timeNote || locNote };
+      }).sort((a, b) => b.total - a.total).slice(0, 3);
+
+      if (basisEl) basisEl.textContent = `${cur.label} · ${currentSpotName}`;
+      row.innerHTML = "";
+      ranked.forEach((item, idx) => {
+        const isCur = item.key === currentSpeciesKey;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "text-left rounded-xl p-2 border transition " + (
+          isCur
+            ? "bg-[#e6ece8] border-[#6c8478] ring-1 ring-[#6c8478]"
+            : "bg-[#f4f1ec] hover:bg-[#eae4da] border-[#e3ddd3]"
+        );
+        btn.innerHTML = `
+          <div class="flex items-center justify-between text-xs font-bold text-[#2f3531]">
+            <span>${idx === 0 ? "🥇" : idx === 1 ? "🥈" : "🥉"} ${item.key}</span>
+            <span class="text-[#4e705e]">${item.total}</span>
+          </div>
+          <div class="text-[10px] text-[#6e736e] mt-0.5 truncate">${item.note}</div>
+        `;
+        btn.addEventListener("click", () => {
+          currentSpeciesKey = item.key;
+          renderSpeciesTabs();
+          computeScores();
+          renderAll();
+        });
+        row.appendChild(btn);
+      });
     }
 
     function computeScores() {
@@ -1098,6 +1215,7 @@
       document.getElementById("detailReasons").innerHTML = item.reasons
         .map((r) => `<li>${r}</li>`)
         .join("");
+      renderRecommendedSpecies();
     }
 
     function renderAll() {
