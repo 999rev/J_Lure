@@ -3,7 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>castwindow · 南宁路亚窗口与标点助手</title>
+  <title>J_Lure</title>
+  <link rel="manifest" href="./manifest.json" />
+  <meta name="theme-color" content="#6c8478" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+  <meta name="apple-mobile-web-app-title" content="J_Lure" />
+  <link rel="apple-touch-icon" href="./icon-192.png" />
   <script src="https://cdn.tailwindcss.com/3.4.17"></script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -29,7 +35,7 @@
       <div>
         <h1 class="text-lg font-bold tracking-tight text-[#2f3531] flex items-center gap-1.5">
           <span>🎣</span>
-          <span>castwindow · 南宁路亚</span>
+          <span>J_Lure</span>
         </h1>
         <p id="coordSubtitle" class="text-[11px] text-[#6e736e]">南宁 · 邕江市区 (22.8170, 108.3665)</p>
       </div>
@@ -715,17 +721,18 @@
 
     function speciesBiasScore(kind, bias) {
       if (bias === "open_water") {
-        if (kind === "支流交汇口") return 10;
+        if (kind === "支流交汇口" || kind === "水库铧尖") return 10;
         if (kind === "拦水坝/闸口") return 8;
         return 0;
       }
       if (bias === "structure_bottom") {
         if (kind === "桥梁跨河结构") return 15;
-        if (kind === "河道急弯") return 12;
+        if (kind === "河道急弯" || kind === "水库铧尖") return 12;
+        if (kind === "水库凹湾") return 8;
         return 0;
       }
       if (bias === "shallow_weed") {
-        if (kind === "河道急弯") return 14;
+        if (kind === "水库凹湾" || kind === "河道急弯") return 14;
         if (kind === "支流交汇口") return 8;
         return 0;
       }
@@ -1467,6 +1474,10 @@
         analyzeNearbyHotspots(lat, lon);
       }
     });
+
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    }
 
     // Init
     loadSavedState();

@@ -1,0 +1,24 @@
+{
+  "name": "castwindow · 南宁路亚",
+  "short_name": "南宁路亚",
+  "description": "南宁/广西路亚出钓窗口期评分、河道结构标点与作钓手法助手",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f4f1ec",
+  "theme_color": "#6c8478",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -86,6 +86,7 @@ def fetch_bbox(s: float, w: float, n: float, e: float) -> dict:
       way["waterway"~"river|stream|canal"]({s},{w},{n},{e});
       way["bridge"="yes"]["highway"~"motorway|trunk|primary|secondary|tertiary"]({s},{w},{n},{e});
       node["waterway"~"weir|dam"]({s},{w},{n},{e});
+      way["natural"="water"]({s},{w},{n},{e});
     );
     out geom;
     """
@@ -110,6 +111,7 @@ def extract_spots(osm_data: dict) -> list[dict]:
     waterways: list[dict] = []
     bridges: list[dict] = []
     weirs: list[dict] = []
+    water_polys: list[dict] = []
 
     for el in osm_data.get("elements", []):
         if el["type"] == "node":
@@ -126,6 +128,8 @@ def extract_spots(osm_data: dict) -> list[dict]:
                 waterways.append(el)
             if tags.get("bridge") == "yes":
                 bridges.append(el)
+            if tags.get("natural") == "water" and len(geom) >= 12:
+                water_polys.append(el)
 
     spots: list[dict] = []
 
@@ -197,6 +201,59 @@ def extract_spots(osm_data: dict) -> list[dict]:
                     "dx": dx,
                     "dy": dy,
                     "desc": f"{w_name} {ang:.0f}° 弯道深槽/缓水区",
+                })
+
+    # 5. 水库/湖泊岸线铧尖（凸向水面）与凹湾（凹入陆地）
+    for wp in water_polys:
+        geom = wp.get("geometry", [])
+        pts = [(pt["lat"], pt["lon"]) for pt in geom]
+        if len(pts) >= 2 and pts[0] == pts[-1]:
+            pts = pts[:-1]
+        if len(pts) < 12:
+            continue
+
+        # 计算有向面积判断多边形绕向（CCW > 0, CW < 0）
+        area2 = 0.0
+        n_pts = len(pts)
+        for i in range(n_pts):
+            y1, x1 = pts[i]
+            y2, x2 = pts[(i + 1) % n_pts]
+            area2 += x1 * y2 - x2 * y1
+        if abs(area2) < 1e-9:
+            continue
+
+        w_name = wp.get("tags", {}).get("name", "水库/湖泊")
+        for i in range(n_pts):
+            a = pts[(i - 1) % n_pts]
+            b = pts[i]
+            c = pts[(i + 1) % n_pts]
+            if haversine_m(a[0], a[1], b[0], b[1]) < 15.0 or haversine_m(b[0], b[1], c[0], c[1]) < 15.0:
+                continue
+            ang = turning_angle_deg(a, b, c)
+            if ang < 38.0 or ang > 150.0:
+                continue
+            cross = (b[1] - a[1]) * (c[0] - b[0]) - (b[0] - a[0]) * (c[1] - b[1])
+            dx, dy = unit_vec(a, c)
+            is_headland = (cross * area2) < 0
+            if is_headland:
+                spots.append({
+                    "k": "水库铧尖",
+                    "lat": round(b[0], 5),
+                    "lon": round(b[1], 5),
+                    "base": 74 + min(8, int(ang // 15)),
+                    "dx": dx,
+                    "dy": dy,
+                    "desc": f"{w_name} 突出铧尖（转向 {ang:.0f}°），鱼群巡游必经通道",
+                })
+            else:
+                spots.append({
+                    "k": "水库凹湾",
+                    "lat": round(b[0], 5),
+                    "lon": round(b[1], 5),
+                    "base": 70 + min(6, int(ang // 18)),
+                    "dx": dx,
+                    "dy": dy,
+                    "desc": f"{w_name} 避风凹湾（转向 {ang:.0f}°），聚饵鱼与浅滩结构区",
                 })
 
     return spots
