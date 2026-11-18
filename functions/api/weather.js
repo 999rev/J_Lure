@@ -59,6 +59,7 @@ export async function onRequest(context) {
     "hourly",
     "temperature_2m,surface_pressure,wind_speed_10m,wind_direction_10m,cloud_cover,precipitation_probability"
   );
+  upstream.searchParams.set("past_days", "1");
   upstream.searchParams.set("forecast_days", "3");
   upstream.searchParams.set("timezone", "auto");
 

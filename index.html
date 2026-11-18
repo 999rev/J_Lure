@@ -29,7 +29,7 @@
       <div>
         <h1 class="text-lg font-bold tracking-tight text-[#2f3531] flex items-center gap-1.5">
           <span>🎣</span>
-          <span>J_Lure</span>
+          <span>castwindow · 南宁路亚</span>
         </h1>
         <p id="coordSubtitle" class="text-[11px] text-[#6e736e]">南宁 · 邕江市区 (22.8170, 108.3665)</p>
       </div>
@@ -800,6 +800,31 @@
       });
     }
 
+    let staticNanningSpots = null;
+
+    async function loadStaticNanningSpots() {
+      if (staticNanningSpots !== null) return staticNanningSpots;
+      try {
+        const r = await fetch("./data/nanning_hotspots.json");
+        if (r.ok) {
+          staticNanningSpots = await r.json();
+          return staticNanningSpots;
+        }
+      } catch (_) {}
+      staticNanningSpots = [];
+      return staticNanningSpots;
+    }
+
+    function windBonusFromVec(dx, dy, windSpeed, windDir) {
+      const rad = (windDir * Math.PI) / 180;
+      const wx = Math.sin(rad), wy = Math.cos(rad);
+      const nx = -dy, ny = dx;
+      const align = Math.abs(nx * wx + ny * wy);
+      if (windSpeed <= 15 && align >= 0.55) return [12, `微风(${windSpeed.toFixed(1)}km/h)吹岸增氧`];
+      if (windSpeed > 18 && align < 0.4) return [10, `大风(${windSpeed.toFixed(1)}km/h)背风易抛投`];
+      return [4, `常规风向(${windSpeed.toFixed(1)}km/h)`];
+    }
+
     async function analyzeNearbyHotspots(lat, lon) {
       const sp = SPECIES_DB[currentSpeciesKey];
       const curItem = scoredHours[selectedIndex];
@@ -808,6 +833,40 @@
       const timeLabel = curItem ? curItem.label : "当前时段";
       mapLinkBanner.textContent = `已联动：${timeLabel} · ${sp.name} · 风速 ${windSpeed.toFixed(1)}km/h`;
       hotspotStatus.textContent = "正在分析周边 1.2km 河道地形...";
+
+      // 优先使用预生成的南宁静态水系库（0.1秒瞬时出标点）
+      const staticList = await loadStaticNanningSpots();
+      if (staticList.length > 0 && lat >= 22.50 && lat <= 23.10 && lon >= 108.00 && lon <= 108.70) {
+        const nearby = staticList
+          .filter((s) => haversineM(lat, lon, s.lat, s.lon) <= 2500)
+          .map((s) => {
+            const [wb, wNote] = windBonusFromVec(s.dx, s.dy, windSpeed, windDir);
+            const bias = speciesBiasScore(s.k, sp.spot_bias);
+            return {
+              kind: s.k,
+              lat: s.lat,
+              lon: s.lon,
+              score: Math.min(99, s.base + wb + bias),
+              reason: `${s.desc}；${wNote}`
+            };
+          })
+          .sort((a, b) => b.score - a.score)
+          .slice(0, 8);
+
+        if (nearby.length > 0) {
+          lastHotspotFetchCoord = `${lat.toFixed(4)},${lon.toFixed(4)}:${currentSpeciesKey}:${selectedIndex}`;
+          terrainSignals = {
+            hasStream: nearby.some((x) => x.kind === "拦水坝/闸口" || x.kind === "支流交汇口"),
+            hasRiver: true,
+            hasBridge: nearby.some((x) => x.kind === "桥梁跨河结构"),
+            hasWeir: nearby.some((x) => x.kind === "拦水坝/闸口")
+          };
+          renderHotspots(nearby);
+          renderRecommendedSpecies();
+          hotspotStatus.textContent = `本地水系库秒级匹配（周边 2.5km 共 ${nearby.length} 个标点）`;
+          return;
+        }
+      }
 
       const query = `[out:json][timeout:30];(way["waterway"~"river|stream|canal"](around:1200,${lat},${lon});way["bridge"="yes"]["highway"~"motorway|trunk|primary|secondary|tertiary"](around:1200,${lat},${lon});node["waterway"~"weir|dam"](around:1200,${lat},${lon}););out geom;`;
 
@@ -1072,13 +1131,20 @@
       return [0, ""];
     }
 
+    function scoreColdFront(delta24h) {
+      if (delta24h <= -7.0) return [-14, `❄️ 强冷锋预警：24h 骤降 ${delta24h.toFixed(1)}°C，鱼群受惊压底停口`];
+      if (delta24h <= -4.5) return [-7, `⚠️ 降温预警：24h 降温 ${delta24h.toFixed(1)}°C，鱼活性下降建议慢搜`];
+      return [0, ""];
+    }
+
     function scoreSingleHourForSpecies(w, delta3h, sp) {
       const [ps] = scorePressure(w.pressure, delta3h);
       const [ws] = scoreWind(w.wind, sp.wind_tolerance_kmh);
       const [ts] = scoreTemp(w.temp, sp.ideal_temp_min, sp.ideal_temp_max);
       const [ls] = scoreLightAndHour(w.hour, w.cloud);
       const [rs] = scoreRain(w.rain);
-      return ps + ws + ts + ls + rs;
+      const [cs] = scoreColdFront(w.tempDelta24h || 0);
+      return ps + ws + ts + ls + rs + cs;
     }
 
     function renderRecommendedSpecies() {
@@ -1135,15 +1201,21 @@
         const [ts, tm] = scoreTemp(w.temp, sp.ideal_temp_min, sp.ideal_temp_max);
         const [ls, lm, softLight] = scoreLightAndHour(w.hour, w.cloud);
         const [rs, rm] = scoreRain(w.rain);
+        const [cs, cm] = scoreColdFront(w.tempDelta24h || 0);
 
-        const total = Math.max(0, Math.min(100, ps + ws + ts + ls + rs));
-        const tactic = (total >= 70 || softLight) ? sp.high_activity_tactic : sp.low_activity_tactic;
+        const total = Math.max(0, Math.min(100, ps + ws + ts + ls + rs + cs));
+        const coldShock = (w.tempDelta24h || 0) <= -7.0;
+        const tactic = (!coldShock && (total >= 70 || softLight))
+          ? sp.high_activity_tactic
+          : sp.low_activity_tactic;
+        const reasons = [pm, wm, tm, lm, rm];
+        if (cm) reasons.unshift(cm);
 
         return {
           ...w,
           delta3h: Number(delta3h.toFixed(1)),
           score: total,
-          reasons: [pm, wm, tm, lm, rm],
+          reasons,
           tactic
         };
       });
@@ -1197,7 +1269,7 @@
 
       const tags = [
         `气压 ${item.pressure.toFixed(0)}hPa (${item.delta3h >= 0 ? "+" : ""}${item.delta3h})`,
-        `气温 ${item.temp.toFixed(1)}°C`,
+        `气温 ${item.temp.toFixed(1)}°C (24h ${(item.tempDelta24h || 0) >= 0 ? "+" : ""}${(item.tempDelta24h || 0).toFixed(1)}°C)`,
         `风速 ${item.wind.toFixed(1)}km/h`,
         `云量 ${item.cloud.toFixed(0)}%`,
         `降水 ${item.rain.toFixed(0)}%`
@@ -1270,6 +1342,7 @@
           hourLabel: `${hh}h`,
           hour: h,
           temp: 23 + Math.sin((h - 6) * Math.PI / 12) * 4,
+          tempDelta24h: -1.0,
           pressure: 1011 + Math.sin(i / 6) * 2.5,
           wind: 7 + Math.abs(Math.cos(i / 4)) * 6,
           windDir: 120,
@@ -1302,13 +1375,21 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = await resp.json();
         const h = data.hourly;
+        const tempByTimeMs = {};
+        for (let i = 0; i < h.time.length; i++) {
+          tempByTimeMs[new Date(h.time[i]).getTime()] = Number(h.temperature_2m[i]);
+        }
         const nowFloor = new Date();
         nowFloor.setMinutes(0, 0, 0);
         const nowMs = nowFloor.getTime();
         const futureList = [];
         for (let i = 0; i < h.time.length; i++) {
           const dt = new Date(h.time[i]);
-          if (dt.getTime() < nowMs) continue;
+          const tMs = dt.getTime();
+          if (tMs < nowMs) continue;
+          const prev24Temp = tempByTimeMs[tMs - 24 * 3600 * 1000];
+          const curTemp = Number(h.temperature_2m[i]);
+          const tempDelta24h = typeof prev24Temp === "number" ? Number((curTemp - prev24Temp).toFixed(1)) : 0;
           const mm = String(dt.getMonth() + 1).padStart(2, "0");
           const dd = String(dt.getDate()).padStart(2, "0");
           const hh = String(dt.getHours()).padStart(2, "0");
@@ -1316,7 +1397,8 @@
             label: `${mm}-${dd} ${hh}:00`,
             hourLabel: `${hh}h`,
             hour: dt.getHours(),
-            temp: Number(h.temperature_2m[i]),
+            temp: curTemp,
+            tempDelta24h,
             pressure: Number(h.surface_pressure[i]),
             wind: Number(h.wind_speed_10m[i]),
             windDir: Number(h.wind_direction_10m ? h.wind_direction_10m[i] : 120),
